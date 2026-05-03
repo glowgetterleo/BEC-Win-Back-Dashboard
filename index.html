@@ -442,37 +442,75 @@ function parseCSV(text) {
 }
 
 function showLoading() {
-  const msg = '<div style="color:var(--muted);padding:24px;text-align:center;font-size:0.85rem">⏳ Loading live data…</div>';
+  const msg = `<div style="color:var(--muted);padding:32px;text-align:center">
+    <div style="font-size:2rem;margin-bottom:10px">⏳</div>
+    <div style="font-size:0.9rem;font-weight:600">Loading live data…</div>
+    <div style="font-size:0.75rem;margin-top:6px;opacity:0.6">Fetching from Google Sheets</div>
+  </div>`;
   ['areaScorecards','top10','remaining'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.innerHTML = msg;
   });
+  const banner = document.getElementById('topScoreBanner');
+  if (banner) banner.innerHTML = '';
 }
 
 function showError(msg) {
-  ['top10','remaining'].forEach(id => {
+  const html = `<div style="background:rgba(239,69,101,0.1);border:1px solid var(--red);border-radius:12px;
+    padding:24px;margin:8px 0;text-align:center">
+    <div style="font-size:1.5rem;margin-bottom:8px">⚠️</div>
+    <div style="color:var(--red);font-weight:700;font-size:0.88rem;margin-bottom:6px">Failed to load data</div>
+    <div style="color:var(--muted);font-size:0.76rem;line-height:1.6">${msg}</div>
+    <button onclick="loadData()" style="margin-top:14px;background:var(--gold);color:#0a0e1a;border:none;
+      padding:10px 20px;border-radius:8px;font-weight:700;cursor:pointer;font-size:0.85rem">
+      🔄 Retry
+    </button>
+  </div>`;
+  ['top10'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.innerHTML = `<div style="color:var(--red);padding:24px;text-align:center;font-size:0.85rem">⚠️ ${msg}</div>`;
+    if (el) el.innerHTML = html;
   });
+  document.getElementById('remaining').innerHTML = '';
+  document.getElementById('areaScorecards').innerHTML = '';
+}
+
+// Multiple proxies as fallbacks in case one is down
+const PROXIES = [
+  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  url => `https://cors-anywhere.herokuapp.com/${url}`,
+];
+
+async function tryFetch(url) {
+  // Try direct first (works on some networks / if CORS is open)
+  try {
+    const res = await fetch(url, { mode: 'cors' });
+    if (res.ok) { const t = await res.text(); if (t && t.length > 10) return t; }
+  } catch(e) {}
+  // Try each proxy in order
+  for (const proxy of PROXIES) {
+    try {
+      const res = await fetch(proxy(url));
+      if (res.ok) { const t = await res.text(); if (t && t.length > 10) return t; }
+    } catch(e) { continue; }
+  }
+  throw new Error('All fetch attempts failed');
 }
 
 async function loadData() {
-  if (CSV_URL === 'YOUR_GOOGLE_SHEET_CSV_URL_HERE') {
+  if (CSV_URL === 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQzkUixrFwedq7wu5eAec11hMmL9R6038B1sK6ma6gHBjv3hrA9pFdZuw0VL9JfIg/pub?gid=1310562387&single=true&output=csv') {
     showError('Please set your Google Sheet CSV URL in the index.html file.');
     return;
   }
   showLoading();
   try {
-    const url = CSV_URL + (CSV_URL.includes('?') ? '&' : '?') + '_cb=' + Date.now();
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const text = await res.text();
-    if (!text || text.trim().length < 10) throw new Error('Empty data');
+    const cacheBust = CSV_URL + (CSV_URL.includes('?') ? '&' : '?') + '_cb=' + Date.now();
+    const text = await tryFetch(cacheBust);
     state = parseCSV(text);
     render();
   } catch(e) {
     console.error(e);
-    showError('Could not load data. Make sure your Google Sheet is published as CSV and the URL is correct.');
+    showError('⚠️ Could not load data. Please check: (1) Your CSV URL is correct, (2) The sheet is published as CSV, (3) You have internet connection.');
   }
 }
 
